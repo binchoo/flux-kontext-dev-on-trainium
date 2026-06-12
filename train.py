@@ -39,6 +39,8 @@ from torchvision.transforms.functional import crop
 from tqdm.auto import tqdm
 from transformers import CLIPTokenizer, PretrainedConfig, T5TokenizerFast
 from parser_helper import parse_args
+import neuron_backend as backend
+from neuron_accelerate import build_accelerator
 import diffusers
 from diffusers import (
     AutoencoderKL,
@@ -105,16 +107,24 @@ def log_validation(
     logger.info(f"Running {tag}... \n ")
     pipeline = pipeline.to(accelerator.device)
     
-    # Use appropriate precision context
+    # Use appropriate precision context. autocast's device-type must match the
+    # backend: "cuda" on GPU, "xla" on Trainium (and "cuda" string would not
+    # dispatch on XLA). On Neuron, bf16 is the practical choice.
+    autocast_device = "xla" if backend.is_xla() else "cuda"
     if accelerator.mixed_precision == "bf16":
-        autocast_ctx = torch.autocast("cuda", dtype=torch.bfloat16)
+        autocast_ctx = torch.autocast(autocast_device, dtype=torch.bfloat16)
     elif accelerator.mixed_precision == "fp16":
-        autocast_ctx = torch.autocast("cuda", dtype=torch.float16)
+        autocast_ctx = torch.autocast(autocast_device, dtype=torch.float16)
     else:
         autocast_ctx = nullcontext()
 
-    # run inference
-    generator = torch.Generator(device=accelerator.device).manual_seed(args.seed) if args.seed else None
+    # run inference. torch.Generator does not support the xla device type; fall
+    # back to a CPU generator on Neuron (seeds the sampling RNG host-side).
+    if args.seed:
+        gen_device = "cpu" if backend.is_xla() else accelerator.device
+        generator = torch.Generator(device=gen_device).manual_seed(args.seed)
+    else:
+        generator = None
     
     with autocast_ctx:
         images = []
@@ -168,8 +178,7 @@ def log_validation(
     del images, prompts, control_images, target_images
     del pipeline
     free_memory()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    backend.empty_cache()
 
 def main(args):
     if args.report_to == "wandb" and args.hub_token is not None:
@@ -188,7 +197,9 @@ def main(args):
 
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir, logging_dir=logging_dir)
     kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(
+    # build_accelerator returns a vanilla accelerate.Accelerator on CUDA/CPU
+    # (unchanged) or optimum.neuron.NeuronAccelerator on the XLA/Trainium backend.
+    accelerator = build_accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
@@ -232,6 +243,9 @@ def main(args):
         if cur_class_images < args.num_class_images:
             has_supported_fp16_accelerator = torch.cuda.is_available() or torch.backends.mps.is_available()
             torch_dtype = torch.float16 if has_supported_fp16_accelerator else torch.float32
+            if backend.is_xla():
+                # Trainium has no fp16 fast path; use bf16 for class-image generation.
+                torch_dtype = torch.bfloat16
             if args.prior_generation_precision == "fp32":
                 torch_dtype = torch.float32
             elif args.prior_generation_precision == "fp16":
@@ -469,8 +483,9 @@ def main(args):
 
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
-    if args.allow_tf32 and torch.cuda.is_available():
-        torch.backends.cuda.matmul.allow_tf32 = True
+    # (no-op on Trainium; neuronx-cc manages precision via bf16)
+    if args.allow_tf32:
+        backend.allow_tf32()
 
     if args.scale_lr:
         args.learning_rate = (
@@ -517,6 +532,12 @@ def main(args):
         )
 
     if args.optimizer.lower() == "adamw":
+        # bitsandbytes 8-bit Adam is a CUDA-only kernel. On Trainium (XLA) fall
+        # back to standard fp32 AdamW (optimizer state stays in fp32 — stable with
+        # a bf16 base, and small for LoRA params).
+        if args.use_8bit_adam and backend.is_xla():
+            logger.warning("use_8bit_adam is not supported on the Neuron/XLA backend; using torch.optim.AdamW.")
+            args.use_8bit_adam = False
         if args.use_8bit_adam:
             try:
                 import bitsandbytes as bnb
@@ -799,7 +820,17 @@ def main(args):
         sigmas = noise_scheduler_copy.sigmas.to(device=accelerator.device, dtype=dtype)
         schedule_timesteps = noise_scheduler_copy.timesteps.to(accelerator.device)
         timesteps = timesteps.to(accelerator.device)
-        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
+        if backend.is_xla():
+            # Vectorized, data-independent index lookup. The original list
+            # comprehension uses `.nonzero().item()` per timestep, which forces a
+            # host sync and fragments the XLA graph (and `.item()` is unsupported
+            # under lazy tracing). Broadcasting + argmax produces identical indices
+            # using pure tensor ops. Assumes each timestep matches exactly one
+            # schedule entry (true for the flow-match scheduler).
+            matches = (schedule_timesteps.unsqueeze(0) == timesteps.unsqueeze(1)).to(dtype)
+            step_indices = matches.argmax(dim=1)
+        else:
+            step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
 
         sigma = sigmas[step_indices].flatten()
         while len(sigma.shape) < n_dim:
@@ -1025,6 +1056,11 @@ def main(args):
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
+            # XLA graph-execution boundary: materialize the accumulated graph once
+            # per loop iteration. No-op on CUDA/CPU; on Trainium this is what keeps
+            # the lazy-tensor graph from growing unbounded across micro-batches.
+            backend.mark_step()
+
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
                 progress_bar.update(1)
@@ -1059,8 +1095,12 @@ def main(args):
                 progress_bar.set_postfix(**logs)
                 accelerator.log(logs, step=global_step)
             
-                # Run validation every args.validation_steps steps (e.g., every 5 steps)
-                if global_step % args.validation_steps == 0:
+                # Run validation every args.validation_steps steps (e.g., every 5 steps).
+                # Skipped on Neuron/XLA: validation sampling runs the pipeline with
+                # different shapes than the training step, which forces neuronx-cc
+                # recompilation and breaks the single-static-graph assumption.
+                # Re-enable once validation shapes are bucketed/compiled separately.
+                if (not backend.is_xla()) and global_step % args.validation_steps == 0:
                     pipeline = FluxKontextPipeline.from_pretrained(
                         args.pretrained_model_name_or_path,
                         transformer=accelerator.unwrap_model(transformer),
