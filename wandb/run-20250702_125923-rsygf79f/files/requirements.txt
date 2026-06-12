@@ -156,7 +156,7 @@ Cython==3.1.0
 exceptiongroup==1.2.2
 pycparser==2.22
 omegaconf==2.3.0
-idna==3.10
+idna==3.15
 soupsieve==2.6
 mdurl==0.1.2
 frozenlist==1.5.0
