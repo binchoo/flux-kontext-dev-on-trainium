@@ -1,18 +1,25 @@
 # App-layer Python deps for FLUX.1-Kontext-dev training on AWS Trainium (Neuron).
 #
-# IMPORTANT: this file deliberately does NOT list packages the Neuron stack owns.
-# setup_neuron.sh installs optimum-neuron[neuronx,training] FIRST, which pins a
-# mutually-compatible set: torch (Neuron build), torch-neuronx, neuronx-cc,
-# libneuronxla, torch_xla, transformers, accelerate, diffusers, peft, tokenizers,
-# huggingface_hub, safetensors, numpy. Re-listing any of those (especially with a
-# hard ==pin) would let pip overwrite the Neuron-pinned versions and pull a CUDA
-# torch — the exact failure to avoid. They are installed under a constraints lock.
+# IMPORTANT: this file does NOT list packages the Neuron stack OWNS (torch,
+# torch-neuronx, neuronx-cc, libneuronxla, torch_xla, transformers, accelerate,
+# tokenizers, huggingface_hub, safetensors, numpy). optimum-neuron[neuronx,training]
+# installs and version-pins those FIRST. Re-listing them here (esp. with a ==pin)
+# would let pip overwrite the Neuron-pinned versions and pull a CUDA torch.
+#
+# Everything below IS installed here, but UNDER a pip constraints lock (see
+# setup_neuron.sh step 5) that freezes the Neuron stack — so resolving these deps
+# can pull legit transitive packages yet can NEVER change torch/transformers/etc.
 #
 # Removed vs the repo's GPU setup:
 #   - bitsandbytes  (CUDA-only 8-bit Adam; XLA falls back to torch.optim.AdamW)
 #   - flash-attn    (CUDA-only; FLUX uses plain SDPA, compiled by neuronx-cc)
 
-# --- Pure-app deps not part of the base Neuron stack ---
+# --- Core model libs required by train.py (NOT pulled by optimum-neuron) ---
+diffusers              # FluxKontextPipeline / FluxTransformer2DModel / AutoencoderKL
+peft                   # LoRA adapters
+torchvision            # image transforms (constraints lock keeps it torch-compatible)
+
+# --- Pure-app deps ---
 Pillow
 tqdm
 datasets

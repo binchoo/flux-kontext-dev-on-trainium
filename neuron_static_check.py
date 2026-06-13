@@ -134,9 +134,13 @@ def check_no_cuda_only_in_reqs() -> None:
 
 
 def check_reqs_excludes_neuron_owned() -> None:
-    """torch/transformers/accelerate/diffusers must NOT be pinned here (owned by optimum-neuron)."""
+    """torch/transformers/accelerate must NOT be pinned here (version-owned by
+    optimum-neuron). diffusers/peft/torchvision ARE app-required and listed here,
+    but installed under a constraints lock so they cannot change torch."""
     text = (REPO / "requirements-neuron.txt").read_text()
-    owned = ["torch", "transformers", "accelerate", "diffusers", "peft", "huggingface_hub", "safetensors"]
+    # Only the version-pinned core. diffusers/peft/torchvision are app deps the
+    # Neuron stack does NOT provide, so they belong here (constraints-protected).
+    owned = ["torch", "transformers", "accelerate", "tokenizers", "huggingface_hub", "safetensors", "numpy"]
     hits = []
     for line in text.splitlines():
         s = line.strip()
@@ -148,7 +152,21 @@ def check_reqs_excludes_neuron_owned() -> None:
     if hits:
         _bad(f"requirements-neuron.txt re-lists Neuron-owned packages (would override): {hits}")
     else:
-        _ok("requirements-neuron.txt leaves the Neuron stack to optimum-neuron")
+        _ok("requirements-neuron.txt leaves the version-pinned Neuron core to optimum-neuron")
+
+
+def check_reqs_has_core_model_libs() -> None:
+    """train.py needs diffusers (+ torchvision); optimum-neuron does NOT pull them.
+    They must be present in requirements-neuron.txt or the run fails at import."""
+    text = (REPO / "requirements-neuron.txt").read_text()
+    listed = {re.split(r"[=<>~ ]", l.strip())[0]
+              for l in text.splitlines() if l.strip() and not l.strip().startswith("#")}
+    required = ["diffusers", "torchvision", "peft"]
+    missing = [p for p in required if p not in listed]
+    if missing:
+        _bad(f"requirements-neuron.txt missing core model libs required by train.py: {missing}")
+    else:
+        _ok("requirements-neuron.txt includes diffusers/torchvision/peft (train.py imports)")
 
 
 # --------------------------------------------------------------------------- #
@@ -212,6 +230,7 @@ def main() -> int:
     check_artifacts()
     check_no_cuda_only_in_reqs()
     check_reqs_excludes_neuron_owned()
+    check_reqs_has_core_model_libs()
 
     print("\n=== Tier B (requires torch) ===")
     if _torch_available():

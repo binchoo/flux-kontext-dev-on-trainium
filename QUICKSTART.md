@@ -85,22 +85,57 @@ optimum.neuron.NeuronAccelerator: OK
 
 ---
 
-## 5. 포팅 정적 검증 (선택, 권장 — 30초)
+## 5. 포팅 정적 검증 + 임포트 게이트 (모델 다운로드 전 필수)
 
-모델 다운로드 전에 포팅이 온전한지 확인합니다.
+모델(~24GB)을 받기 전에, ① 포팅이 온전한지 ② train.py가 필요로 하는 모든
+패키지가 실제로 import 되는지 확인합니다. 이 게이트를 통과해야 6단계로 갑니다.
 
 ```bash
 source .venv-neuron/bin/activate
+
+# (1) 정적 검증
 python neuron_static_check.py
+
+# (2) 임포트 게이트 — train.py가 쓰는 핵심 패키지 + torch가 Neuron 빌드인지
+python - <<'PY'
+import importlib, sys
+mods = ["torch", "diffusers", "transformers", "accelerate", "peft",
+        "torchvision", "PIL", "datasets", "sentencepiece", "optimum.neuron"]
+missing = []
+for m in mods:
+    try:
+        importlib.import_module(m)
+    except Exception as e:
+        missing.append(f"{m}: {e!r}")
+import torch
+print("torch:", torch.__version__)
+assert "+cu" not in torch.__version__, "FATAL: CUDA torch installed (Neuron stack overwritten)"
+if missing:
+    print("MISSING:", *missing, sep="\n  ")
+    sys.exit(1)
+print("=== import gate PASSED ===")
+PY
 ```
 
-화면 끝에 다음이 표시됩니다:
+기대 출력:
 
 ```
 === Summary ===
-passed: 13   failed: 0
+passed: 14   failed: 0
 All available checks passed.
+torch: 2.x.x          (← +cu 가 없어야 정상)
+=== import gate PASSED ===
 ```
+
+> **만약 `MISSING: diffusers ...` 등이 뜨면** — 해당 패키지가 빠진 것이니, torch를
+> 건드리지 않도록 Neuron 스택을 constraints로 잠근 채 설치하고 게이트를 다시 실행:
+>
+> ```bash
+> python -m pip freeze | grep -iE '^(torch|torch-xla|torch-neuronx|torchvision|neuronx-cc|libneuronxla|transformers|tokenizers|accelerate|huggingface-hub|safetensors|numpy)==' > /tmp/c.txt
+> python -m pip install -c /tmp/c.txt -r requirements-neuron.txt
+> # torchvision이 여전히 없으면 (torch 안 건드리고):
+> python -c "import torchvision" 2>/dev/null || pip install --no-deps torchvision
+> ```
 
 ---
 
