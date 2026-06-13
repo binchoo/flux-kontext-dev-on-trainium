@@ -173,50 +173,50 @@ FLUX 성공을 가른 분기).
 
 ```mermaid
 flowchart TD
-    Start([CUDA 학습 코드 + 대상 모델]) --> Triage{모델 인코더가<br/>동적 shape를 쓰나?<br/>masked_select·unique·cu_seqlens}
+    Start(["CUDA 학습 코드 + 대상 모델"]) --> Triage{"모델 인코더가<br/>동적 shape를 쓰나?<br/>masked_select / unique / cu_seqlens"}
 
-    Triage -->|쓴다 예: Qwen2.5-VL| Reject["정적화 = 모델 재작성 수준<br/>→ 고정길이 인코더 모델로 교체 검토<br/>(FLUX: T5+CLIP 고정 패딩)"]
+    Triage -->|"쓴다 (예 Qwen2.5-VL)"| Reject["정적화 = 모델 재작성 수준<br/>고정길이 인코더 모델로 교체 검토<br/>FLUX: T5+CLIP 고정 패딩"]
     Reject --> Start
-    Triage -->|안 쓴다 예: FLUX| Analyze[1. 하드웨어 결합 지점 식별<br/>모델 레이어는 건드리지 않음]
+    Triage -->|"안 쓴다 (예 FLUX)"| Analyze["Step 1 하드웨어 결합 지점 식별<br/>모델 레이어는 건드리지 않음"]
 
-    Analyze --> Scan{무엇이 CUDA에<br/>묶여 있나?}
-    Scan -->|torch.cuda.* 직접 호출| D1[디바이스 추상화]
-    Scan -->|Accelerator·분산엔진| D2[분산 엔진 교체]
-    Scan -->|CUDA 전용 기능| D3[기능 비활성·대체]
-    Scan -->|lazy-tensor 실행 모델| D4[XLA 실행 경계 삽입]
-    Scan -->|데이터 의존 host sync| D5[벡터화]
+    Analyze --> Scan{"무엇이 CUDA에<br/>묶여 있나?"}
+    Scan -->|"torch.cuda 직접 호출"| D1["디바이스 추상화"]
+    Scan -->|"Accelerator / 분산엔진"| D2["분산 엔진 교체"]
+    Scan -->|"CUDA 전용 기능"| D3["기능 비활성 / 대체"]
+    Scan -->|"lazy-tensor 실행 모델"| D4["XLA 실행 경계 삽입"]
+    Scan -->|"데이터 의존 host sync"| D5["벡터화"]
 
-    D1 --> B1["neuron_backend.py<br/>cuda→실제호출 · xla→no-op·xm.*"]
-    D2 --> B2["build_accelerator 팩토리<br/>Accelerator→NeuronAccelerator"]
-    D3 --> B3["8bit-Adam→AdamW · flash→SDPA<br/>autocast/Generator 백엔드분기"]
-    D4 --> B4["train loop에 mark_step<br/>(스텝당 1회)"]
-    D5 --> B5["get_sigmas .nonzero().item()<br/>→ argmax 벡터화"]
+    D1 --> B1["neuron_backend.py<br/>cuda는 실제호출 / xla는 no-op·xm"]
+    D2 --> B2["build_accelerator 팩토리<br/>Accelerator를 NeuronAccelerator로"]
+    D3 --> B3["8bit-Adam은 AdamW로 / flash는 SDPA로<br/>autocast·Generator 백엔드분기"]
+    D4 --> B4["train loop에 mark_step 삽입<br/>스텝당 1회"]
+    D5 --> B5["get_sigmas의 nonzero item을<br/>argmax 벡터화"]
 
     B1 --> Guard
     B2 --> Guard
     B3 --> Guard
     B4 --> Guard
     B5 --> Guard
-    Guard[모든 변경은 백엔드 분기로 가드<br/>→ CUDA 경로 보존 · additive·guarded]
+    Guard["모든 변경은 백엔드 분기로 가드<br/>CUDA 경로 보존 (additive guarded)"]
 
-    Guard --> Env[2. Neuron 환경 구성<br/>optimum-neuron neuronx,training<br/>단일 eager 설치 + constraints 잠금]
+    Guard --> Env["Step 2 Neuron 환경 구성<br/>optimum-neuron neuronx training extra<br/>단일 eager 설치 + constraints 잠금"]
 
-    Env --> Static[3. 정적 검증<br/>neuron_static_check.py<br/>하드웨어 없이 분기·아티팩트 확인]
+    Env --> Static["Step 3 정적 검증<br/>neuron_static_check.py<br/>하드웨어 없이 분기·아티팩트 확인"]
 
-    Static --> Compile[4. neuronx-cc 컴파일<br/>고정 shape → 단일 정적 그래프 .neff]
+    Static --> Compile["Step 4 neuronx-cc 컴파일<br/>고정 shape를 단일 정적 그래프 neff로"]
 
-    Compile --> Runtime{5. 런타임<br/>XLA 비호환 패턴?}
-    Runtime -->|inference_mode·동적 shape| Fix[no_grad 가드 ·<br/>shape 고정·validation 스킵]
-    Runtime -->|이상 없음| Train
+    Compile --> Runtime{"Step 5 런타임<br/>XLA 비호환 패턴?"}
+    Runtime -->|"inference_mode / 동적 shape"| Fix["no_grad 가드<br/>shape 고정·validation 스킵"]
+    Runtime -->|"이상 없음"| Train
     Fix --> Train
-    Train([6. 학습 진행 → 멀티코어 확장])
+    Train(["Step 6 학습 진행 후 멀티코어 확장"])
 
-    style Start fill:#eee,stroke:#333
-    style Triage fill:#fdd,stroke:#c00
-    style Reject fill:#fdd,stroke:#c00
-    style Analyze fill:#ff9,stroke:#333
-    style Guard fill:#cdf,stroke:#333
-    style Train fill:#9f9,stroke:#333
+    style Start fill:#eeeeee,stroke:#333333
+    style Triage fill:#ffdddd,stroke:#cc0000
+    style Reject fill:#ffdddd,stroke:#cc0000
+    style Analyze fill:#ffff99,stroke:#333333
+    style Guard fill:#ccddff,stroke:#333333
+    style Train fill:#99ff99,stroke:#333333
 ```
 
 **단계 요약**:
