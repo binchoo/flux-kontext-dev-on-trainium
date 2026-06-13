@@ -65,6 +65,13 @@ RUN python -m pip install --no-deps \
         "diffusers==0.35.2" "optimum-neuron==0.4.5" \
         "accelerate==1.8.1" "safetensors" "huggingface-hub"
 
+# numpy in the venv was conda-installed (file:// freeze pin, stripped by grep),
+# so the module copies over but has NO pip .dist-info. transformers queries
+# importlib.metadata.version('numpy') at import and dies: PackageNotFoundError.
+# Reinstall numpy via pip at the venv version so the metadata exists. --no-deps
+# keeps it from dragging anything else.
+RUN python -m pip install --no-deps --force-reinstall "numpy==1.26.4"
+
 # Pure-python transitive the model libs import at load time. WITH deps here (not
 # --no-deps): these are arch-independent (httpx/httpcore/anyio, pydantic, rich)
 # so letting pip pull THEIR transitive can't touch torch/numpy, and it ends the
