@@ -80,7 +80,7 @@ gate() {
   login_dlc
   docker run --rm --entrypoint bash "$DLC" -lc '
     pip install -q --no-deps "optimum-neuron==0.4.5" "optimum==2.0.0" "diffusers==0.35.2" "accelerate==1.8.1" 2>&1 | tail -3
-    pip install -q "huggingface-hub" "safetensors" "httpx" "pydantic" 2>&1 | tail -2
+    pip install -q "huggingface-hub" "safetensors" "httpx" "pydantic" "tenacity" 2>&1 | tail -2
     python -c "import transformers,diffusers; print(\"tf\",transformers.__version__,\"df\",diffusers.__version__)"
     python -c "from optimum.neuron import NeuronFluxKontextPipeline; print(\"KONTEXT OK\")"
   '

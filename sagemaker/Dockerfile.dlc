@@ -27,7 +27,9 @@ RUN python -m pip install --no-deps \
 
 # Pure-python transitive the above import at load (DLC may already have most;
 # WITH deps is fine — arch-independent, won't touch torch/numpy).
-RUN python -m pip install "huggingface-hub" "safetensors" "httpx" "pydantic"
+# tenacity: neuronx_distributed.trainer.checkpoint_storage imports it, and
+# optimum.exporters.neuron pulls that in. Not in the DLC by default; add it.
+RUN python -m pip install "huggingface-hub" "safetensors" "httpx" "pydantic" "tenacity"
 
 # Build-time check: NO Neuron runtime init (no device in builder). Just confirm
 # the import graph resolves — the real .neff load happens at serve time on inf2.
