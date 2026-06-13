@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="820" viewBox="0 0 1700 820" font-family="Helvetica,Arial,sans-serif">
+<rect width="1700" height="820" fill="white"/>
+<line x1="135" y1="445" x2="135" y2="145" stroke="#333333" stroke-width="1.3"/>
+<line x1="135" y1="445" x2="140" y2="725" stroke="#333333" stroke-width="1.3"/>
+<line x1="140" y1="725" x2="930" y2="725" stroke="#333333" stroke-width="1.3" stroke-dasharray="5,4"/>
+<line x1="135" y1="445" x2="535" y2="445" stroke="#333333" stroke-width="1.3"/>
+<line x1="535" y1="445" x2="560" y2="329" stroke="#d79b00" stroke-width="1.3" stroke-dasharray="5,4"/>
+<line x1="535" y1="445" x2="930" y2="445" stroke="#333333" stroke-width="1.3"/>
+<line x1="930" y1="445" x2="935" y2="320" stroke="#82b366" stroke-width="1.3" stroke-dasharray="5,4"/>
+<line x1="930" y1="445" x2="930" y2="725" stroke="#333333" stroke-width="1.3"/>
+<line x1="135" y1="445" x2="1370" y2="445" stroke="#333333" stroke-width="1.3"/>
+<line x1="1370" y1="445" x2="930" y2="725" stroke="#333333" stroke-width="1.3"/>
+<text x="40.0" y="38.0" font-size="15" font-weight="bold" fill="#111">Diffusers on AWS Neuron — UML Communication Diagram (numbered messages = sequence)</text>
+<rect x="60.0" y="420.0" width="150.0" height="50.0" rx="3" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="135" y="450" font-size="12" fill="#111" text-anchor="middle" font-weight="bold" text-decoration="underline">:MLEngineer</text>
+<rect x="60.0" y="120.0" width="150.0" height="50.0" rx="3" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
+<text x="135" y="149" font-size="10.5" fill="#111" text-anchor="middle" text-decoration="underline">:HuggingFaceHub</text>
+<rect x="60.0" y="700.0" width="160.0" height="50.0" rx="3" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="140" y="724" font-size="10.5" fill="#111" text-anchor="middle" text-decoration="underline">:GPUTrainer</text>
+<text x="140" y="734" font-size="10.5" fill="#111" text-anchor="middle">(CUDA diffusers)</text>
+<rect x="450.0" y="420.0" width="170.0" height="50.0" rx="3" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
+<text x="535" y="444" font-size="12" fill="#111" text-anchor="middle" font-weight="bold" text-decoration="underline">:NeuronAgent</text>
+<text x="535" y="456" font-size="12" fill="#111" text-anchor="middle" font-weight="bold">(triage + port)</text>
+<rect x="850.0" y="420.0" width="160.0" height="50.0" rx="3" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="930" y="444" font-size="12" fill="#111" text-anchor="middle" font-weight="bold" text-decoration="underline">:Trainium</text>
+<text x="930" y="456" font-size="12" fill="#111" text-anchor="middle" font-weight="bold">(neuronx-cc)</text>
+<rect x="850.0" y="700.0" width="160.0" height="50.0" rx="3" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
+<text x="930" y="724" font-size="10.5" fill="#111" text-anchor="middle" text-decoration="underline">:ArtifactRegistry</text>
+<text x="930" y="734" font-size="10.5" fill="#111" text-anchor="middle">(S3 / ECR)</text>
+<rect x="1280.0" y="420.0" width="180.0" height="50.0" rx="3" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.3"/>
+<text x="1370" y="444" font-size="12" fill="#111" text-anchor="middle" font-weight="bold" text-decoration="underline">:SageMakerEndpoint</text>
+<text x="1370" y="456" font-size="12" fill="#111" text-anchor="middle" font-weight="bold">(inf2 / trn)</text>
+<rect x="90.0" y="280.0" width="120.0" height="20.0" rx="3" fill="#ffffff" stroke="#333333" stroke-width="1.3"/>
+<text x="150" y="294" font-size="10.5" fill="#111" text-anchor="middle">1: selectModel()</text>
+<rect x="80.0" y="590.0" width="130.0" height="20.0" rx="3" fill="#ffffff" stroke="#333333" stroke-width="1.3"/>
+<text x="145" y="604" font-size="10.5" fill="#111" text-anchor="middle">2: fineTune(LoRA)</text>
+<rect x="470.0" y="715.0" width="130.0" height="20.0" rx="3" fill="#ffffff" stroke="#333333" stroke-width="1.3"/>
+<text x="535" y="729" font-size="10.5" fill="#111" text-anchor="middle">2.1: putWeights()</text>
+<rect x="270.0" y="420.0" width="120.0" height="20.0" rx="3" fill="#ffffff" stroke="#333333" stroke-width="1.3"/>
+<text x="330" y="434" font-size="10.5" fill="#111" text-anchor="middle">3: triage(model)</text>
+<rect x="400.0" y="300.0" width="320.0" height="58.0" rx="3" fill="#fff5e6" stroke="#d79b00" stroke-width="1.3"/>
+<text x="406" y="312" font-size="10.5" fill="#111" text-anchor="start">3.1: checkDynamicShape() / optimumSupported?</text>
+<text x="406" y="322" font-size="10.5" fill="#111" text-anchor="start">3.2 [unsupported] portToNeuronOps()  // static-shape / NKI</text>
+<text x="406" y="332" font-size="10.5" fill="#111" text-anchor="start">     [supported] reuse HF/AWS port  // FLUX/SD/SDXL</text>
+<rect x="640.0" y="420.0" width="180.0" height="20.0" rx="3" fill="#ffffff" stroke="#333333" stroke-width="1.3"/>
+<text x="730" y="434" font-size="10.5" fill="#111" text-anchor="middle">4: compile(export=True, tp=8)</text>
+<rect x="850.0" y="300.0" width="170.0" height="40.0" rx="3" fill="#eaf3e8" stroke="#82b366" stroke-width="1.3"/>
+<text x="856" y="312" font-size="10.5" fill="#111" text-anchor="start">4.1: HLO → .neff</text>
+<text x="856" y="322" font-size="10.5" fill="#111" text-anchor="start">4.2 validate(golden)</text>
+<rect x="845.0" y="585.0" width="150.0" height="20.0" rx="3" fill="#ffffff" stroke="#333333" stroke-width="1.3"/>
+<text x="920" y="599" font-size="10.5" fill="#111" text-anchor="middle">5: putArtifact(.neff)</text>
+<rect x="700.0" y="392.0" width="190.0" height="20.0" rx="3" fill="#ffffff" stroke="#333333" stroke-width="1.3"/>
+<text x="795" y="406" font-size="10.5" fill="#111" text-anchor="middle">6: deploy(model_data=.neff)</text>
+<rect x="1030.0" y="585.0" width="220.0" height="20.0" rx="3" fill="#ffffff" stroke="#333333" stroke-width="1.3"/>
+<text x="1140" y="599" font-size="10.5" fill="#111" text-anchor="middle">6.1: load(.neff)  // no runtime compile</text>
+<rect x="700.0" y="490.0" width="240.0" height="20.0" rx="3" fill="#e6ffe6" stroke="#006600" stroke-width="1.3"/>
+<text x="820" y="505" font-size="12" fill="#111" text-anchor="middle" font-weight="bold">7: infer(image, prompt) → editedImage</text>
+</svg>
