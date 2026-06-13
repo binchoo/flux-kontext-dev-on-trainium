@@ -95,8 +95,26 @@ def model_fn(model_dir):
     logger.info("[model_fn] resolved compiled dir: %s", candidate)
 
     pipe = NeuronFluxKontextPipeline.from_pretrained(candidate)
+    _patch_config_dtype(pipe)
     logger.info("[model_fn] pipeline loaded + device init in %.1fs", time.time() - t0)
     return pipe
+
+
+def _patch_config_dtype(pipe):
+    """Work around optimum-neuron 0.4.5: NeuronModelTextEncoder.forward does
+    `outputs[...].to(self.config.dtype)` but the wrapped DiffusersPretrainedConfig
+    has no `dtype` -> AttributeError on T5 text_encoder_2 at inference. Inject it."""
+    import torch
+
+    for name in ("text_encoder", "text_encoder_2", "transformer", "vae",
+                 "vae_encoder", "vae_decoder"):
+        comp = getattr(pipe, name, None)
+        cfg = getattr(comp, "config", None)
+        if cfg is not None and not hasattr(cfg, "dtype"):
+            try:
+                cfg.dtype = torch.bfloat16
+            except Exception:
+                pass
 
 
 def _looks_like_compiled_dir(path):

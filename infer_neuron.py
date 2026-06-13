@@ -61,6 +61,23 @@ def unletterbox(img, paste_box, out_w, out_h):
     return cropped.resize((out_w, out_h), Image.BICUBIC)
 
 
+def _patch_config_dtype(pipe):
+    """Work around an optimum-neuron 0.4.5 bug: its NeuronModelTextEncoder.forward
+    does `outputs[...].to(self.config.dtype)`, but the wrapped DiffusersPretrained
+    Config has no `dtype` attr -> AttributeError at inference (T5 text_encoder_2).
+    Inject dtype on every sub-model config that lacks it (bf16, our compile dtype).
+    """
+    for name in ("text_encoder", "text_encoder_2", "transformer", "vae",
+                 "vae_encoder", "vae_decoder"):
+        comp = getattr(pipe, name, None)
+        cfg = getattr(comp, "config", None)
+        if cfg is not None and not hasattr(cfg, "dtype"):
+            try:
+                cfg.dtype = torch.bfloat16
+            except Exception:
+                pass
+
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model-id", default="black-forest-labs/FLUX.1-Kontext-dev",
@@ -119,6 +136,8 @@ def main():
         # --- Phase 2: load compiled artifact and serve ---
         print(f"[serve] loading compiled artifact from {args.compiled_dir} ...")
         pipe = NeuronFluxKontextPipeline.from_pretrained(args.compiled_dir)
+
+    _patch_config_dtype(pipe)
 
     # If only compiling and no image given, stop after compile.
     if args.export and args.image is None:
