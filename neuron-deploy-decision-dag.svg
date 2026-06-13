@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1340" height="860" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <!-- UML dependency arrowhead: open V, dashed line -->
+    <marker id="uml" markerWidth="14" markerHeight="14" refX="11" refY="6"
+            orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M1,1 L11,6 L1,11" fill="none" stroke="#555" stroke-width="1.4"/>
+    </marker>
+  </defs>
+
+  <style>
+    .edge { stroke:#666; stroke-width:1.4; stroke-dasharray:6 4; fill:none; marker-end:url(#uml); }
+    .box  { rx:8; ry:8; stroke-width:1.6; }
+    .def  { fill:#e7f0ff; stroke:#4a82c4; }
+    .pin  { fill:#fff2cc; stroke:#d6a700; stroke-width:3; }
+    .leaf { fill:#d6f5de; stroke:#2a9d54; }
+    .new  { fill:#ffe6cc; stroke:#e8841a; }
+    .t    { font-size:12.5px; fill:#1a1a1a; }
+    .num  { font-size:12.5px; font-weight:bold; fill:#1a1a1a; }
+    .legend { font-size:12px; fill:#333; }
+    .title  { font-size:17px; font-weight:bold; fill:#111; }
+  </style>
+
+  <text x="30" y="34" class="title">Neuron 추론 배포 — 의사결정 DAG (A ╌╌▷ B = A는 B에 의존 · 역순 = 작업순서)</text>
+
+  <!-- ===================== EDGES (drawn first, behind boxes) ===================== -->
+  <!-- centers: box 240x56, center=(x+120,y+28) -->
+  <!-- INVOKE(640,98)->LOG(640,188) -->
+  <line class="edge" x1="640" y1="126" x2="640" y2="180"/>
+  <!-- LOG->CREATE -->
+  <line class="edge" x1="640" y1="216" x2="640" y2="270"/>
+  <!-- CREATE(640,298) -> N5(300,408) -->
+  <line class="edge" x1="600" y1="326" x2="350" y2="382"/>
+  <!-- CREATE -> ENV(640,408) -->
+  <line class="edge" x1="640" y1="326" x2="640" y2="382"/>
+  <!-- CREATE -> COLD(940,408) -->
+  <line class="edge" x1="690" y1="326" x2="900" y2="382"/>
+  <!-- CREATE -> ROLE(1200,408) -->
+  <line class="edge" x1="700" y1="320" x2="1180" y2="384"/>
+  <!-- CREATE -> INST(960,518) -->
+  <line class="edge" x1="710" y1="322" x2="980" y2="494"/>
+  <!-- CREATE -> IMG(1200,518) -->
+  <line class="edge" x1="720" y1="318" x2="1200" y2="494"/>
+  <!-- N5(300,408) -> HANDLER(60,518) -->
+  <line class="edge" x1="240" y1="436" x2="180" y2="492"/>
+  <!-- N5 -> N4(400,518) -->
+  <line class="edge" x1="330" y1="436" x2="480" y2="492"/>
+  <!-- N5 -> N3(700,518) -->
+  <line class="edge" x1="360" y1="432" x2="760" y2="494"/>
+  <!-- N3(700,518) -> SHAPE(820,628) -->
+  <line class="edge" x1="800" y1="546" x2="880" y2="600"/>
+  <!-- N3 -> N2(440,628) -->
+  <line class="edge" x1="730" y1="546" x2="540" y2="602"/>
+  <!-- N3 -> N0(640,738) -->
+  <line class="edge" x1="760" y1="546" x2="700" y2="710"/>
+  <!-- N4(400,518) -> N2(440,628) -->
+  <line class="edge" x1="510" y1="546" x2="540" y2="600"/>
+  <!-- N2(440,628) -> N1(640,738) -->
+  <line class="edge" x1="540" y1="656" x2="620" y2="710"/>
+  <!-- N1(640,738) -> N0(640,... ) ; N0 at (640,738) row below -->
+  <line class="edge" x1="660" y1="766" x2="660" y2="800"/>
+  <!-- INST(960,518) -> QUOTA(960,628) -->
+  <line class="edge" x1="1080" y1="546" x2="1080" y2="600"/>
+  <!-- QUOTA(960,628) -> SHAPE(820,628) -->
+  <line class="edge" x1="1080" y1="656" x2="940" y2="648"/>
+  <!-- IMG(1200,518) -> N1(640,738) -->
+  <line class="edge" x1="1200" y1="546" x2="770" y2="724"/>
+  <!-- IMG -> ROLE(1200,408) -->
+  <line class="edge" x1="1290" y1="510" x2="1290" y2="466"/>
+
+  <!-- ===================== NODES ===================== -->
+  <!-- 16 INVOKE -->
+  <rect class="box def" x="520" y="70" width="240" height="56"/>
+  <text class="num" x="534" y="94">16</text>
+  <text class="t"   x="534" y="112">invoke 로 호출 테스트한다</text>
+
+  <!-- 15 LOG (new) -->
+  <rect class="box new" x="520" y="160" width="240" height="56"/>
+  <text class="num" x="534" y="184">15</text>
+  <text class="t"   x="534" y="202">CloudWatch 로그로 기동 확인</text>
+
+  <!-- 14 CREATE -->
+  <rect class="box def" x="520" y="270" width="240" height="56"/>
+  <text class="num" x="534" y="294">14</text>
+  <text class="t"   x="534" y="312">엔드포인트를 생성한다</text>
+
+  <!-- 7 N5 -->
+  <rect class="box def" x="180" y="380" width="240" height="56"/>
+  <text class="num" x="194" y="404">7</text>
+  <text class="t"   x="194" y="422">model.tar.gz 묶어 S3 업로드</text>
+
+  <!-- 12 ENV (leaf) -->
+  <rect class="box leaf" x="520" y="380" width="240" height="56"/>
+  <text class="num" x="534" y="404">12</text>
+  <text class="t"   x="534" y="422">NEURON_RT_CORES·offline env</text>
+
+  <!-- 13 COLD (new) -->
+  <rect class="box new" x="820" y="380" width="240" height="56"/>
+  <text class="num" x="834" y="404">13</text>
+  <text class="t"   x="834" y="422">cold-start→health timeout 산정</text>
+
+  <!-- 11 ROLE (leaf) -->
+  <rect class="box leaf" x="1170" y="410" width="240" height="56"/>
+  <text class="num" x="1184" y="434">11</text>
+  <text class="t"   x="1184" y="452">실행 role S3·ECR 권한 확인</text>
+
+  <!-- 5 HANDLER (new) -->
+  <rect class="box new" x="40" y="490" width="240" height="56"/>
+  <text class="num" x="54" y="514">5</text>
+  <text class="t"   x="54" y="532">핸들러 전·후처리 작성</text>
+
+  <!-- 6 N4 -->
+  <rect class="box def" x="320" y="490" width="240" height="56"/>
+  <text class="num" x="334" y="514">6</text>
+  <text class="t"   x="334" y="532">DLC 부족분 requirements.txt</text>
+
+  <!-- 4 N3 -->
+  <rect class="box def" x="620" y="490" width="240" height="56"/>
+  <text class="num" x="634" y="514">4</text>
+  <text class="t"   x="634" y="532">목적 DLC 버전으로 .neff 빌드</text>
+
+  <!-- 10 INST -->
+  <rect class="box def" x="960" y="490" width="240" height="56"/>
+  <text class="num" x="974" y="514">10</text>
+  <text class="t"   x="974" y="532">인스턴스 유형을 요청한다</text>
+
+  <!-- 8 IMG (new) -->
+  <rect class="box new" x="1170" y="490" width="240" height="56"/>
+  <text class="num" x="1184" y="514">8</text>
+  <text class="t"   x="1184" y="532">이미지 URI 확정 (DLC/ECR)</text>
+
+  <!-- 2 N2 -->
+  <rect class="box def" x="320" y="600" width="240" height="56"/>
+  <text class="num" x="334" y="624">2</text>
+  <text class="t"   x="334" y="642">DLC import 확인 (docker run)</text>
+
+  <!-- 9 QUOTA -->
+  <rect class="box def" x="960" y="600" width="240" height="56"/>
+  <text class="num" x="974" y="624">9</text>
+  <text class="t"   x="974" y="642">TP 코어 인스턴스 쿼터 확보</text>
+
+  <!-- 1 N1 (pin) -->
+  <rect class="box pin" x="520" y="710" width="240" height="56"/>
+  <text class="num" x="534" y="734">1</text>
+  <text class="t"   x="534" y="752">버전 맞는 DLC 태그 선택 ★</text>
+
+  <!-- 3 SHAPE (new) -->
+  <rect class="box new" x="820" y="600" width="240" height="56"/>
+  <text class="num" x="834" y="624">3</text>
+  <text class="t"   x="834" y="642">입력 shape·TP·정밀도 결정</text>
+
+  <!-- 0 N0 (leaf) -->
+  <rect class="box leaf" x="520" y="800" width="240" height="56"/>
+  <text class="num" x="534" y="824">0</text>
+  <text class="t"   x="534" y="842">컴파일 venv 버전 읽기</text>
+
+  <!-- ===================== LEGEND ===================== -->
+  <rect x="40" y="640" width="18" height="14" class="box pin"/>
+  <text x="64" y="652" class="legend">★ 고정점 (DLC)</text>
+  <rect x="40" y="664" width="18" height="14" class="box leaf"/>
+  <text x="64" y="676" class="legend">leaf = 먼저 착수</text>
+  <rect x="40" y="688" width="18" height="14" class="box new"/>
+  <text x="64" y="700" class="legend">보강 노드</text>
+  <text x="40" y="726" class="legend" font-style="italic">╌╌▷ depends-on</text>
+</svg>

@@ -62,8 +62,10 @@ RUN python -m pip install --no-deps \
 # dropped these conda file:// pins; with-deps would re-resolve and conflict with
 # the venv stack). Keep --no-deps to install the code verbatim.
 RUN python -m pip install --no-deps \
-        "diffusers==0.35.2" "optimum-neuron==0.4.5" \
-        "accelerate==1.8.1" "safetensors" "huggingface-hub"
+        "transformers==4.57.6" \
+        "diffusers==0.35.2" "optimum-neuron==0.4.5" "optimum==2.0.0" \
+        "accelerate==1.8.1" "safetensors" "huggingface-hub" \
+        "tokenizers" "regex" "pillow"
 
 # numpy in the venv was conda-installed (file:// freeze pin, stripped by grep),
 # so the module copies over but has NO pip .dist-info. transformers queries
