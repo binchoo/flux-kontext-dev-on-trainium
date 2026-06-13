@@ -67,11 +67,16 @@ def main():
             "height": args.height,
             "width": args.width,
         }
+        # disable_neuron_cache=True: optimum-neuron 0.4.5's MultiModelCacheEntry
+        # only supports stable-diffusion (unet-based) models — for the FLUX DiT it
+        # raises NotImplementedError. Disabling the compile cache skips that broken
+        # registration path and compiles directly. (Cost: no cross-run cache reuse.)
         pipe = NeuronFluxKontextPipeline.from_pretrained(
             args.model_id,
             torch_dtype=torch.bfloat16,
             export=True,
             tensor_parallel_size=args.tensor_parallel_size,
+            disable_neuron_cache=True,
             **compiler_args,
             **input_shapes,
         )
