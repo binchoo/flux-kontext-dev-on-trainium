@@ -137,6 +137,18 @@ def main():
             # 12-core inf2.24xlarge. Pin visibility/count explicitly so the worker
             # claims exactly 8 cores (avoids over-subscription if multiple workers).
             "NEURON_RT_NUM_CORES": "8",
+            # CRITICAL: force EXACTLY ONE torchserve worker. By default torchserve
+            # scales workers to CPU count (trn1 = 128 vCPU -> dozens of workers).
+            # Each worker runs model_fn and tries to claim the 8 TP NeuronCores,
+            # so they fight over the cores and the lazy `from optimum.neuron import
+            # NeuronFluxKontextPipeline` collides across processes -> "cannot import
+            # name" + "Backend worker process died". One worker = one model owning
+            # the 8 cores. (SAGEMAKER_MODEL_SERVER_WORKERS is the toolkit knob;
+            # the min/max default workers are the torchserve-level guards.)
+            "SAGEMAKER_MODEL_SERVER_WORKERS": "1",
+            "TS_DEFAULT_WORKERS_PER_MODEL": "1",
+            "TS_MIN_WORKERS": "1",
+            "TS_MAX_WORKERS": "1",
             # Keep model loading offline (gated base repo; artifact is self-contained).
             "HF_HUB_OFFLINE": "1",
             "TRANSFORMERS_OFFLINE": "1",
