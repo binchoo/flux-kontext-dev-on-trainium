@@ -96,9 +96,10 @@ source .venv-neuron/bin/activate
 # (1) 정적 검증
 python neuron_static_check.py
 
-# (2) 임포트 게이트 — train.py가 쓰는 핵심 패키지 + torch가 Neuron 빌드인지
+# (2) 임포트 게이트 — train.py가 쓰는 핵심 패키지 + torch가 torch-neuronx와 짝인지
 python - <<'PY'
 import importlib, sys
+import importlib.metadata as md
 mods = ["torch", "diffusers", "transformers", "accelerate", "peft",
         "torchvision", "PIL", "datasets", "sentencepiece", "optimum.neuron"]
 missing = []
@@ -107,12 +108,19 @@ for m in mods:
         importlib.import_module(m)
     except Exception as e:
         missing.append(f"{m}: {e!r}")
-import torch
-print("torch:", torch.__version__)
-assert "+cu" not in torch.__version__, "FATAL: CUDA torch installed (Neuron stack overwritten)"
 if missing:
     print("MISSING:", *missing, sep="\n  ")
     sys.exit(1)
+import torch
+v = torch.__version__
+print("torch:", v)
+assert "+cu" not in v, "FATAL: CUDA torch installed (Neuron stack overwritten)"
+# torch must match torch-neuronx pairing (e.g. torch-neuronx 2.8.x ↔ torch 2.8.x).
+# A newer non-CUDA torch (e.g. 2.12) also breaks Neuron — catch it here.
+tnx = md.version("torch-neuronx")
+tnx_mm = ".".join(tnx.split(".")[:2])
+torch_mm = ".".join(v.split("+")[0].split(".")[:2])
+assert torch_mm == tnx_mm, f"FATAL: torch {torch_mm} != torch-neuronx pairing {tnx_mm}"
 print("=== import gate PASSED ===")
 PY
 ```
@@ -123,18 +131,19 @@ PY
 === Summary ===
 passed: 14   failed: 0
 All available checks passed.
-torch: 2.x.x          (← +cu 가 없어야 정상)
+torch: 2.8.0          (← torch-neuronx와 같은 2.8 라인이어야 정상)
 === import gate PASSED ===
 ```
 
-> **만약 `MISSING: diffusers ...` 등이 뜨면** — 해당 패키지가 빠진 것이니, torch를
-> 건드리지 않도록 Neuron 스택을 constraints로 잠근 채 설치하고 게이트를 다시 실행:
+> **만약 `MISSING: ...` 또는 `torch X != torch-neuronx pairing Y`가 뜨면** — torch가
+> Neuron 짝에서 벗어난 것이니, torch를 짝 버전으로 되돌리고 모델 libs를 `--no-deps`로
+> 재설치한 뒤 게이트를 다시 실행:
 >
 > ```bash
-> python -m pip freeze | grep -iE '^(torch|torch-xla|torch-neuronx|torchvision|neuronx-cc|libneuronxla|transformers|tokenizers|accelerate|huggingface-hub|safetensors|numpy)==' > /tmp/c.txt
-> python -m pip install -c /tmp/c.txt -r requirements-neuron.txt
-> # torchvision이 여전히 없으면 (torch 안 건드리고):
-> python -c "import torchvision" 2>/dev/null || pip install --no-deps torchvision
+> TNX=$(python -c "import importlib.metadata as m; print('.'.join(m.version('torch-neuronx').split('.')[:2]))")
+> pip install --no-deps "torch==${TNX}.0" "torchvision==0.23.*"
+> pip install --no-deps diffusers peft
+> pip install Pillow tqdm datasets sentencepiece wandb importlib_metadata regex requests filelock pyyaml
 > ```
 
 ---
