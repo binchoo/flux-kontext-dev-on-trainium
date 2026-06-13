@@ -27,9 +27,50 @@ ENDPOINT="${ENDPOINT:-flux-kontext-neuron}"
 
 MODEL_ID="${MODEL_ID:-black-forest-labs/FLUX.1-Kontext-dev}"
 HEIGHT="${HEIGHT:-1024}"; WIDTH="${WIDTH:-1024}"; TP="${TP:-8}"
-HOST_NEFF="${HOST_NEFF:-/home/ec2-user/SageMaker/flux_kontext_neuron_sdk225}"  # NEW dir (don't clobber old .neff)
-HF_HOME_HOST="${HF_HOME_HOST:-/home/ec2-user/SageMaker/hf_cache}"
+
+# --- Storage: keep EVERYTHING off the small root volume (125G, fills up & dies
+# with "no space left on device" / "Background writer channel closed"). The big
+# EBS volume is /home/ec2-user/SageMaker (~288G free). Three big consumers:
+#   1) HF model cache (~24GB download)       -> HF_HOME_HOST
+#   2) compiled .neff output                 -> HOST_NEFF
+#   3) Docker images+layers (DLC ~15GB)      -> DOCKER_DATA_ROOT
+BIGVOL="${BIGVOL:-/home/ec2-user/SageMaker}"
+HOST_NEFF="${HOST_NEFF:-$BIGVOL/flux_kontext_neuron_sdk225}"   # NEW dir (don't clobber old .neff)
+HF_HOME_HOST="${HF_HOME_HOST:-$BIGVOL/hf_cache}"
+DOCKER_DATA_ROOT="${DOCKER_DATA_ROOT:-$BIGVOL/docker}"
+TMPDIR_HOST="${TMPDIR_HOST:-$BIGVOL/tmp}"                      # docker build context / tar staging
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Relocate Docker's data-root to the big volume if it isn't already there.
+ensure_docker_dataroot() {
+  local cur
+  cur="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo '')"
+  if [ "$cur" = "$DOCKER_DATA_ROOT" ]; then
+    echo "  docker data-root already on big volume: $cur"; return 0
+  fi
+  echo "  docker data-root is '$cur' (likely root volume) -> moving to $DOCKER_DATA_ROOT"
+  sudo mkdir -p "$DOCKER_DATA_ROOT" /etc/docker
+  # merge data-root into daemon.json without clobbering other keys (best-effort)
+  if [ -f /etc/docker/daemon.json ]; then
+    sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
+  fi
+  printf '{\n  "data-root": "%s"\n}\n' "$DOCKER_DATA_ROOT" | sudo tee /etc/docker/daemon.json >/dev/null
+  sudo systemctl restart docker
+  sleep 3
+  echo "  docker data-root now: $(docker info -f '{{.DockerRootDir}}' 2>/dev/null)"
+}
+
+# Fail fast if the big volume is low; warn on root.
+check_disk() {
+  echo "=== disk check ==="
+  df -h "$BIGVOL" / 2>/dev/null | sed 's/^/  /'
+  local avail_g
+  avail_g="$(df -BG --output=avail "$BIGVOL" 2>/dev/null | tail -1 | tr -dc '0-9')"
+  if [ -n "$avail_g" ] && [ "$avail_g" -lt 60 ]; then
+    echo "  !! WARNING: <60G free on $BIGVOL — rebuild(.neff ~24GB DL) + image(~15GB) may not fit."
+  fi
+  mkdir -p "$HOST_NEFF" "$HF_HOME_HOST" "$TMPDIR_HOST"
+}
 
 login_dlc() { aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin 763104351884.dkr.ecr."$REGION".amazonaws.com; }
 login_mine(){ aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$ACCT".dkr.ecr."$REGION".amazonaws.com; }
@@ -48,22 +89,38 @@ gate() {
 
 build_image() {
   echo "=== build serving image from DLC: $IMAGE:$TAG ==="
+  ensure_docker_dataroot
+  check_disk
   login_dlc
-  docker build --build-arg BASE="$DLC" -t "${IMAGE}:${TAG}" -f "$HERE/Dockerfile.dlc" "$HERE"
+  # TMPDIR/DOCKER_TMPDIR on the big volume so the build context / extraction
+  # doesn't spill onto root.
+  TMPDIR="$TMPDIR_HOST" DOCKER_TMPDIR="$TMPDIR_HOST" \
+    docker build --build-arg BASE="$DLC" -t "${IMAGE}:${TAG}" -f "$HERE/Dockerfile.dlc" "$HERE"
 }
 
 rebuild_neff() {
   echo "=== rebuild .neff INSIDE the image (neuronx-cc 2.25 == serve runtime) -> $HOST_NEFF ==="
-  mkdir -p "$HOST_NEFF" "$HF_HOME_HOST"
+  check_disk
+  # Discover the actual NeuronCore device nodes (don't hardcode 0-7; depends on
+  # instance + whether other procs hold cores). Build the --device flags.
+  local devargs=()
+  shopt -s nullglob
+  for d in /dev/neuron*; do devargs+=(--device "$d"); done
+  shopt -u nullglob
+  if [ ${#devargs[@]} -eq 0 ]; then
+    echo "  !! no /dev/neuron* found — are you on an inf2/trn instance? rebuild needs a real device."
+    exit 1
+  fi
+  echo "  passing devices: ${devargs[*]}"
   # Run compile in the SAME image we serve with, mounting NeuronCores + repo + caches.
   # infer_neuron.py --export lives at the repo root (one level up from sagemaker/).
   REPO_ROOT="$(cd "$HERE/.." && pwd)"
   docker run --rm \
-    --device /dev/neuron0 --device /dev/neuron1 --device /dev/neuron2 --device /dev/neuron3 \
-    --device /dev/neuron4 --device /dev/neuron5 --device /dev/neuron6 --device /dev/neuron7 \
+    "${devargs[@]}" \
     -e HF_TOKEN="${HF_TOKEN:-}" \
     -e HF_HOME=/hf -e HF_HUB_DISABLE_XET=1 \
     -e NEURON_RT_VISIBLE_CORES=0-7 \
+    -e NEURON_COMPILE_CACHE_URL=/hf/neuron-compile-cache \
     -v "$REPO_ROOT":/work -v "$HOST_NEFF":/neff -v "$HF_HOME_HOST":/hf \
     --entrypoint bash "${IMAGE}:${TAG}" -lc "
       cd /work &&
@@ -76,7 +133,10 @@ rebuild_neff() {
 
 package_push_deploy() {
   echo "=== package model.tar.gz (.neff @ $HOST_NEFF + code/) -> S3 ==="
-  bash "$HERE/build_model_tar.sh" --compiled-dir "$HOST_NEFF" --bucket "$BUCKET" --prefix "$PREFIX" --region "$REGION"
+  # TMPDIR on big volume: build_model_tar.sh uses mktemp -d (stages ~24GB); /tmp
+  # may be small/tmpfs and would OOM. Point it at the big volume.
+  mkdir -p "$TMPDIR_HOST"
+  TMPDIR="$TMPDIR_HOST" bash "$HERE/build_model_tar.sh" --compiled-dir "$HOST_NEFF" --bucket "$BUCKET" --prefix "$PREFIX" --region "$REGION"
 
   echo "=== push serving image to ECR ==="
   aws ecr create-repository --repository-name "$IMAGE" --region "$REGION" >/dev/null 2>&1 || true
