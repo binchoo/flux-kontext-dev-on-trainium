@@ -92,12 +92,35 @@ if [[ ! -f "${STAGE}/model_index.json" ]]; then
 fi
 
 echo "[3/4] Creating ${OUTPUT_TAR} ..."
-# Build the tarball from inside STAGE so paths are relative (no leading dir).
-tar -C "${STAGE}" -czf "${OUTPUT_TAR}" .
+# .neff / safetensors are high-entropy binaries -> gzip barely shrinks them while
+# single-threaded gzip pegs one core for a long time. Pick the fastest available:
+#   1) pigz  -> parallel gzip across all cores (keeps .gz format, much faster)
+#   2) none  -> store-only tar (no compression); SageMaker reads the archive by
+#               CONTENT not extension, so a store tar named .gz still extracts.
+# COMPRESS=pigz|gzip|none overrides the auto-pick.
+COMPRESS="${COMPRESS:-auto}"
+if [ "${COMPRESS}" = "auto" ]; then
+  if command -v pigz >/dev/null 2>&1; then COMPRESS=pigz; else COMPRESS=none; fi
+fi
+case "${COMPRESS}" in
+  pigz)
+    echo "      using pigz (parallel gzip, $(nproc) cores)"
+    tar -C "${STAGE}" -cf - . | pigz -p "$(nproc)" > "${OUTPUT_TAR}" ;;
+  gzip)
+    echo "      using gzip (single-thread)"
+    tar -C "${STAGE}" -czf "${OUTPUT_TAR}" . ;;
+  none)
+    echo "      using store-only tar (no compression; fastest for binary weights)"
+    tar -C "${STAGE}" -cf "${OUTPUT_TAR}" . ;;
+  *) echo "unknown COMPRESS=${COMPRESS}"; exit 1 ;;
+esac
 echo "      Tar contents (top level):"
-tar -tzf "${OUTPUT_TAR}" | sed 's#^\./##' | awk -F/ '{print $1}' | sort -u | sed 's/^/        /'
+tar -tf "${OUTPUT_TAR}" 2>/dev/null | sed 's#^\./##' | awk -F/ '{print $1}' | sort -u | sed 's/^/        /'
 
 echo "[4/4] Uploading to s3://${BUCKET}/${PREFIX}/model.tar.gz ..."
+# Multipart parallel upload tuned for one big file -> saturate bandwidth.
+aws configure set default.s3.max_concurrent_requests 20 2>/dev/null || true
+aws configure set default.s3.multipart_chunksize 64MB 2>/dev/null || true
 aws s3 cp "${OUTPUT_TAR}" "s3://${BUCKET}/${PREFIX}/model.tar.gz" --region "${REGION}"
 
 echo ""
