@@ -11,18 +11,17 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
 # --- base OS + python 3.10 (matches the venv interpreter) -------------------
-# default-jre: multi-model-server / torchserve have a JAVA (Netty) frontend that
-# owns the HTTP /ping + /invocations endpoints and manages the python workers.
-# The DLC shipped a JRE; our clean ubuntu base does not, so MMS fails at boot
-# with "java not found, please make sure JAVA_HOME is set". Install a JRE.
+# nginx: front web server on :8080. NO Java — we use the AWS-documented BYOC
+# pattern (Flask + Gunicorn + Nginx) instead of multi-model-server/torchserve
+# (which need a JVM Netty frontend). SageMaker only requires a :8080 server
+# answering /ping + /invocations; it does NOT require Java.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.10 python3.10-venv python3-pip \
         curl gnupg ca-certificates \
         libgomp1 \
-        default-jre-headless && \
+        nginx && \
     ln -sf /usr/bin/python3.10 /usr/bin/python && \
     rm -rf /var/lib/apt/lists/*
-ENV JAVA_HOME=/usr/lib/jvm/default-java
 
 # --- SYSTEM Neuron runtime from the official apt repo -----------------------
 # These .deb provide libnrt with the NRT_2.0.0 symbols (nrt_all_gather etc.)
@@ -73,22 +72,23 @@ RUN python -m pip install --no-deps \
 RUN python -m pip install \
         "httpx" "pydantic" "rich" "psutil" "hf_xet" "requests" "tokenizers"
 
-# --- SageMaker serving stack (what the DLC used to give us) ------------------
-# multi-model-server + sagemaker-inference run the model_fn/input_fn/predict_fn
-# /output_fn handler contract. torchserve alt also works; MMS is lighter.
-RUN python -m pip install \
-        multi-model-server sagemaker-inference retrying
+# --- SageMaker serving stack: Flask + Gunicorn + Nginx (NO JVM) --------------
+# The AWS BYOC inference pattern. flask app = serving/predictor.py (wraps the
+# four functions in code/inference.py); gunicorn runs it; nginx fronts :8080.
+RUN python -m pip install flask gunicorn
 
-# SageMaker invokes this with `serve`; it boots the sagemaker-inference model
-# server, which loads our HandlerService (handler_service.py), which in turn
-# imports the user handler from /opt/ml/model/code/inference.py at runtime.
-COPY serving_entrypoint.py /usr/local/bin/serving_entrypoint.py
-COPY handler_service.py /home/model-server/handler_service.py
-ENV PYTHONPATH=/home/model-server:$PYTHONPATH
-WORKDIR /home/model-server
-ENTRYPOINT ["python", "/usr/local/bin/serving_entrypoint.py"]
-CMD ["serve"]
+# serving/ holds: serve (entrypoint), predictor.py (flask /ping + /invocations),
+# wsgi.py (gunicorn target), nginx.conf. Put them on PATH at /opt/program.
+COPY serving/ /opt/program/
+RUN chmod +x /opt/program/serve
+ENV PATH=/opt/program:$PATH
+ENV PYTHONUNBUFFERED=TRUE PYTHONDONTWRITEBYTECODE=TRUE
+WORKDIR /opt/program
+
+# SageMaker runs the container as `<image> serve`; /opt/program/serve starts
+# nginx + gunicorn. (No ENTRYPOINT: SageMaker passes `serve` as the command and
+# finds it on PATH, matching the AWS BYOC example.)
 
 # Build-time checks that do NOT init the Neuron runtime (no device in builder).
 RUN python -c "import pkg_resources; print('pkg_resources OK')" && \
-    python -c "import torch, diffusers, numpy, PIL; print('torch', torch.__version__, '| diffusers', diffusers.__version__)"
+    python -c "import torch, diffusers, numpy, PIL, flask, gunicorn; print('torch', torch.__version__, '| diffusers', diffusers.__version__, '| flask OK')"
