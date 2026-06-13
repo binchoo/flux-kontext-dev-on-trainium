@@ -29,6 +29,38 @@ import os
 import torch
 
 
+def letterbox(img, target_w, target_h, fill=(127, 127, 127)):
+    """Resize `img` to fit target_w x target_h preserving aspect ratio, padding
+    the remainder (letterbox). Returns (padded_image, paste_box) where paste_box
+    = (left, top, w, h) locates the real content inside the padded canvas — used
+    to crop the output back to the original aspect ratio.
+
+    The .neff is compiled for a FIXED resolution, so the model must always see
+    target_w x target_h. Plain resize would distort non-square inputs (the cat
+    stretched vertically); letterbox keeps the aspect ratio.
+    """
+    from PIL import Image
+
+    ow, oh = img.size
+    scale = min(target_w / ow, target_h / oh)
+    nw, nh = max(1, round(ow * scale)), max(1, round(oh * scale))
+    resized = img.resize((nw, nh), Image.BICUBIC)
+    canvas = Image.new("RGB", (target_w, target_h), fill)
+    left, top = (target_w - nw) // 2, (target_h - nh) // 2
+    canvas.paste(resized, (left, top))
+    return canvas, (left, top, nw, nh)
+
+
+def unletterbox(img, paste_box, out_w, out_h):
+    """Inverse of letterbox: crop the padded content out of `img` and resize it
+    back to the original aspect ratio (out_w x out_h)."""
+    from PIL import Image
+
+    left, top, nw, nh = paste_box
+    cropped = img.crop((left, top, left + nw, top + nh))
+    return cropped.resize((out_w, out_h), Image.BICUBIC)
+
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model-id", default="black-forest-labs/FLUX.1-Kontext-dev",
@@ -97,7 +129,11 @@ def main():
     if args.image is None:
         raise SystemExit("Provide --image <path/URL> to run editing inference.")
     print(f"[serve] editing {args.image} with prompt: {args.prompt!r}")
-    source = load_image(args.image).resize((args.width, args.height))
+    raw = load_image(args.image)
+    orig_w, orig_h = raw.size
+    # Letterbox to the compiled (fixed) resolution so aspect ratio is preserved —
+    # plain resize stretches non-square inputs. We crop the result back afterward.
+    source, paste_box = letterbox(raw, args.width, args.height)
     generator = torch.Generator("cpu").manual_seed(args.seed)
     image = pipe(
         image=source,
@@ -106,8 +142,10 @@ def main():
         num_inference_steps=args.num_inference_steps,
         generator=generator,
     ).images[0]
+    # Crop the padding out and restore the original aspect ratio.
+    image = unletterbox(image, paste_box, orig_w, orig_h)
     image.save(args.out)
-    print(f"[done] saved edited image to {args.out}")
+    print(f"[done] saved edited image to {args.out} (restored {orig_w}x{orig_h} aspect)")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,26 @@
+# Extra Python deps installed into the SageMaker Neuron inference DLC at
+# container start (SageMaker pip-installs code/requirements.txt).
+#
+# IMPORTANT: The AWS pytorch-inference-neuronx DLC already ships the Neuron
+# stack (torch, torch-neuronx, neuronx-cc, libneuronxla, torch_xla,
+# transformers) version-pinned by Neuron. Do NOT re-pin those here -- doing so
+# can clobber the Neuron-pinned versions or pull a CUDA torch. We only add the
+# diffusers / optimum-neuron serving layer that the FLUX.1-Kontext pipeline
+# needs and that may not already be in the image.
+#
+# Newer pytorch-inference-neuronx tags (sdk2.30.x) may already bundle a
+# compatible optimum-neuron. If the DLC tag you pick already includes these,
+# this file is a no-op (pip will see the requirement satisfied). Verify the
+# DLC contents and trim if redundant.
+
+# FLUX.1-Kontext pipeline requires diffusers 0.35.x (NeuronFluxKontextPipeline
+# / FluxKontext support landed in this line).
+diffusers==0.35.*
+
+# optimum-neuron provides NeuronFluxKontextPipeline. [neuronx] extra ensures the
+# Neuron runtime bindings are present (already in the DLC, but harmless to name).
+optimum-neuron[neuronx]
+
+# Pillow is used for image (de)serialization in the handler. Usually already
+# present via diffusers/transformers, listed for safety.
+Pillow

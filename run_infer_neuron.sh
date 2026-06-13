@@ -19,6 +19,15 @@ TP="${TP:-8}"            # tensor-parallel degree (docs: 8 on inf2.24xlarge / tr
 export FLUX_BACKEND=xla
 export NEURON_COMPILE_CACHE_URL="${NEURON_COMPILE_CACHE_URL:-/var/tmp/neuron-compile-cache}"
 
+# Send the HF model cache (~24GB) to the large SageMaker volume, NOT the root
+# volume (~/.cache, 125G — fills up and the downloader dies with
+# "Background writer channel closed"). Override HF_HOME to relocate it.
+export HF_HOME="${HF_HOME:-/home/ec2-user/SageMaker/hf_cache}"
+mkdir -p "$HF_HOME"
+# The HF xet transfer backend has intermittently failed mid-download
+# ("Internal Writer Error"); the classic path is more reliable for big weights.
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
+
 PHASE="${1:-compile}"
 
 case "$PHASE" in
