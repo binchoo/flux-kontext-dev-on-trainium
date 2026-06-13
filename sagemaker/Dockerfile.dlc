@@ -1,0 +1,42 @@
+# =============================================================================
+# DLC-FIXED serving image (working-backward, the correct path).
+#
+# Base = the OFFICIAL AWS Neuron INFERENCE DLC, fixed first:
+#   pytorch-inference-neuronx:2.7.0-neuronx-py310-sdk2.25.0-ubuntu22.04
+#   (py310 -> optimum-neuron 0.4.5 installable; Neuron 2.25; inf2; torch-neuronx 2.7)
+#
+# Why this beats copying the compile venv:
+#   The DLC already ships torch-neuronx / neuronx-cc / transformers / numpy with
+#   matching system .deb runtime AND proper pip metadata. So we DON'T re-create
+#   the stack (which hit: file:// freeze drops, missing .dist-info, nrt_all_gather
+#   ABI, pkg_resources, JVM). We only ADD the two libs the DLC lacks:
+#   optimum-neuron (NeuronFluxKontextPipeline) + diffusers — and the .neff is
+#   REBUILT inside THIS image's neuronx-cc 2.25 (see rebuild step), so the
+#   compile == serve runtime exactly. No ABI/version gap by construction.
+# =============================================================================
+ARG BASE=763104351884.dkr.ecr.us-west-2.amazonaws.com/pytorch-inference-neuronx:2.7.0-neuronx-py310-sdk2.25.0-ubuntu22.04
+FROM ${BASE}
+
+# Only the missing model libs. --no-deps so pip can't re-resolve and disturb the
+# DLC's pinned torch-neuronx/transformers/numpy. optimum-neuron 0.4.5 needs
+# transformers~=4.57 & optimum~=2.0; if the DLC's transformers differs the build
+# verification below will reveal it (then pin transformers explicitly).
+RUN python -m pip install --no-deps \
+        "optimum-neuron==0.4.5" "optimum==2.0.0" \
+        "diffusers==0.35.2" "accelerate==1.8.1"
+
+# Pure-python transitive the above import at load (DLC may already have most;
+# WITH deps is fine — arch-independent, won't touch torch/numpy).
+RUN python -m pip install "huggingface-hub" "safetensors" "httpx" "pydantic"
+
+# Build-time check: NO Neuron runtime init (no device in builder). Just confirm
+# the import graph resolves — the real .neff load happens at serve time on inf2.
+RUN python -c "import torch, transformers, diffusers, numpy, PIL; \
+print('torch', torch.__version__, '| tf', transformers.__version__, '| df', diffusers.__version__)"
+RUN python -c "import optimum.neuron; print('optimum-neuron', optimum.neuron.__version__)" \
+    || echo "WARN: optimum.neuron import deferred to serve time (needs device)"
+
+# Serving: the DLC already ships torchserve + sagemaker-pytorch-inference, which
+# auto-loads code/inference.py (model_fn/input_fn/predict_fn/output_fn) via
+# SAGEMAKER_PROGRAM. No custom Flask/MMS/handler needed — that was a symptom of
+# NOT using a DLC. SageMaker invokes the DLC's built-in serve entrypoint.
