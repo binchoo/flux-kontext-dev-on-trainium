@@ -136,7 +136,14 @@ def main():
             # The pipeline self-manages the 8 NeuronCores it needs for TP8 on the
             # 12-core inf2.24xlarge. Pin visibility/count explicitly so the worker
             # claims exactly 8 cores (avoids over-subscription if multiple workers).
-            "NEURON_RT_NUM_CORES": "8",
+            # Pin the EXACT cores (0-7), not just the count. On the endpoint the
+            # host exposes ALL cores (NEURON_CORE_HOST_TOTAL=64 on trn1), and
+            # NEURON_RT_NUM_CORES=8 ("use 8") let the runtime fail at
+            # init_sp_resource (event semaphore vaddr) -> NRT_RESOURCE / Allocation
+            # Failure. Locally `--device /dev/neuron0..7` worked because it
+            # physically exposed exactly those. VISIBLE_CORES reproduces that:
+            # claim cores 0-7 explicitly so the TP8 graph maps cleanly.
+            "NEURON_RT_VISIBLE_CORES": "0-7",
             # CRITICAL: force EXACTLY ONE torchserve worker. By default torchserve
             # scales workers to CPU count (trn1 = 128 vCPU -> dozens of workers).
             # Each worker runs model_fn and tries to claim the 8 TP NeuronCores,
