@@ -87,12 +87,18 @@ if is_torch_npu_available():
 
 args = parse_args()
 
-def load_text_encoders(class_one, class_two):
+def load_text_encoders(class_one, class_two, load_dtype=None):
+    # load_dtype: on Neuron/XLA we load directly in bf16 to halve host-RAM/HBM
+    # peak (the encoders are frozen, only used for inference). On CUDA load_dtype
+    # is None -> original fp32 load, unchanged.
+    _kw = {"torch_dtype": load_dtype} if load_dtype is not None else {}
     text_encoder_one = class_one.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision, variant=args.variant
+        args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision, variant=args.variant,
+        **_kw,
     )
     text_encoder_two = class_two.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="text_encoder_2", revision=args.revision, variant=args.variant
+        args.pretrained_model_name_or_path, subfolder="text_encoder_2", revision=args.revision, variant=args.variant,
+        **_kw,
     )
     return text_encoder_one, text_encoder_two
 
@@ -326,15 +332,28 @@ def main(args):
         args.pretrained_model_name_or_path, subfolder="scheduler"
     )
     noise_scheduler_copy = copy.deepcopy(noise_scheduler)
-    text_encoder_one, text_encoder_two = load_text_encoders(text_encoder_cls_one, text_encoder_cls_two)
+
+    # On Neuron/XLA, load all frozen models directly in bf16 instead of the default
+    # fp32. Each data-parallel worker otherwise holds a full fp32 copy (~40GB), which
+    # exhausts host RAM at >1 worker and overruns the 16GB NeuronCore HBM. bf16 halves
+    # the load peak. CUDA path keeps load_dtype=None (fp32 load, then cast at L360) so
+    # GPU behaviour is unchanged.
+    load_dtype = torch.bfloat16 if backend.is_xla() else None
+    _model_kw = {"torch_dtype": load_dtype} if load_dtype is not None else {}
+
+    text_encoder_one, text_encoder_two = load_text_encoders(
+        text_encoder_cls_one, text_encoder_cls_two, load_dtype=load_dtype
+    )
     vae = AutoencoderKL.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="vae",
         revision=args.revision,
         variant=args.variant,
+        **_model_kw,
     )
     transformer = FluxTransformer2DModel.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="transformer", revision=args.revision, variant=args.variant
+        args.pretrained_model_name_or_path, subfolder="transformer", revision=args.revision, variant=args.variant,
+        **_model_kw,
     )
 
     # We only train the additional adapter LoRA layers
