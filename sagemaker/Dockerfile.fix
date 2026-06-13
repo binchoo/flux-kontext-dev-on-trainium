@@ -1,0 +1,61 @@
+# Self-contained Neuron serving image — NO AWS DLC base.
+# Rationale: every DLC tag mismatched our compile env. The .neff was built with
+#   torch-neuronx 2.8.0 / neuronx-cc 2.21.33363 / libneuronxla 2.2.12677 (py310),
+# but DLC tags pair those pip versions with an OLDER system runtime (.deb), whose
+# libnrt lacks symbols libneuronxla 2.2 needs (undefined symbol: nrt_all_gather).
+# Fix: build from a clean Ubuntu, install the SYSTEM Neuron runtime that matches
+# libneuronxla 2.2 (Neuron SDK 2.20+ apt repo), then drop in the EXACT venv pip
+# stack, then add the SageMaker serving toolkit (what the DLC used to provide).
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+# --- base OS + python 3.10 (matches the venv interpreter) -------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.10 python3.10-venv python3-pip \
+        curl gnupg ca-certificates \
+        libgomp1 && \
+    ln -sf /usr/bin/python3.10 /usr/bin/python && \
+    rm -rf /var/lib/apt/lists/*
+
+# --- SYSTEM Neuron runtime from the official apt repo -----------------------
+# These .deb provide libnrt with the NRT_2.0.0 symbols (nrt_all_gather etc.)
+# that the venv's libneuronxla 2.2.x links against. Installing latest runtime
+# (>=2.20 era) satisfies the 2.2 pip ABI.
+RUN echo "deb https://apt.repos.neuron.amazonaws.com jammy main" > /etc/apt/sources.list.d/neuron.list && \
+    curl -fsSL https://apt.repos.neuron.amazonaws.com/GPG-PUB-KEY-AMAZON-AWS-NEURON.PUB | gpg --dearmor -o /usr/share/keyrings/neuron.gpg && \
+    sed -i 's#deb #deb [signed-by=/usr/share/keyrings/neuron.gpg] #' /etc/apt/sources.list.d/neuron.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        aws-neuronx-runtime-lib aws-neuronx-collectives aws-neuronx-tools && \
+    rm -rf /var/lib/apt/lists/*
+ENV PATH=/opt/aws/neuron/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/aws/neuron/lib:$LD_LIBRARY_PATH
+
+# --- EXACT venv pip stack (torch-neuronx 2.8, neuronx-cc 2.21, optimum 0.4.5) -
+COPY venv-neuron-requirements.txt /tmp/venv-neuron-requirements.txt
+RUN python -m pip install --upgrade "pip" "setuptools<81" wheel && \
+    python -m pip install \
+        --extra-index-url https://pip.repos.neuron.amazonaws.com \
+        -r /tmp/venv-neuron-requirements.txt && \
+    python -m pip install "setuptools<81"
+
+# --- SageMaker serving stack (what the DLC used to give us) ------------------
+# multi-model-server + sagemaker-inference run the model_fn/input_fn/predict_fn
+# /output_fn handler contract. torchserve alt also works; MMS is lighter.
+RUN python -m pip install \
+        multi-model-server sagemaker-inference retrying
+
+# SageMaker invokes this with `serve`; it boots the sagemaker-inference model
+# server, which loads our HandlerService (handler_service.py), which in turn
+# imports the user handler from /opt/ml/model/code/inference.py at runtime.
+COPY serving_entrypoint.py /usr/local/bin/serving_entrypoint.py
+COPY handler_service.py /home/model-server/handler_service.py
+ENV PYTHONPATH=/home/model-server:$PYTHONPATH
+WORKDIR /home/model-server
+ENTRYPOINT ["python", "/usr/local/bin/serving_entrypoint.py"]
+CMD ["serve"]
+
+# Build-time checks that do NOT init the Neuron runtime (no device in builder).
+RUN python -c "import pkg_resources; print('pkg_resources OK')" && \
+    python -c "import torch, diffusers, numpy, PIL; print('torch', torch.__version__, '| diffusers', diffusers.__version__)"

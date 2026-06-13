@@ -13,6 +13,13 @@
 # this file is a no-op (pip will see the requirement satisfied). Verify the
 # DLC contents and trim if redundant.
 
+# The py312 serving DLC's bootstrap (sagemaker_pytorch_serving_container ->
+# torchserve.py) does `import pkg_resources`, which setuptools>=81 removed. If
+# the image ships (or pip pulls) a setuptools>=81, the container dies at startup
+# with `ModuleNotFoundError: No module named 'pkg_resources'` BEFORE model_fn
+# even runs (ping health check then fails). Pin <81 to keep pkg_resources.
+setuptools<81
+
 # FLUX.1-Kontext pipeline requires diffusers 0.35.x (NeuronFluxKontextPipeline
 # / FluxKontext support landed in this line).
 diffusers==0.35.*
