@@ -33,12 +33,41 @@ ENV PATH=/opt/aws/neuron/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/aws/neuron/lib:$LD_LIBRARY_PATH
 
 # --- EXACT venv pip stack (torch-neuronx 2.8, neuronx-cc 2.21, optimum 0.4.5) -
+# venv-neuron-requirements.txt is a COMPLETE freeze (every transitive dep already
+# pinned), so install it with --no-deps: pip must NOT re-resolve (the full set has
+# mutually-conflicting pins like sagemaker-core that ResolutionImpossible's). The
+# freeze IS the resolved graph; we just materialize it verbatim.
 COPY venv-neuron-requirements.txt /tmp/venv-neuron-requirements.txt
-RUN python -m pip install --upgrade "pip" "setuptools<81" wheel && \
-    python -m pip install \
+RUN python -m pip install --upgrade "pip" "setuptools<81" wheel
+RUN python -m pip install --no-deps \
         --extra-index-url https://pip.repos.neuron.amazonaws.com \
-        -r /tmp/venv-neuron-requirements.txt && \
-    python -m pip install "setuptools<81"
+        -r /tmp/venv-neuron-requirements.txt
+RUN python -m pip install "setuptools<81"
+
+# --no-deps skips pure-python transitive deps that aren't in the freeze. Backfill
+# the common ones torch/diffusers/transformers import at load time. These are
+# arch-independent (no native build, won't touch torch/numpy), safe to add.
+RUN python -m pip install --no-deps \
+        typing_extensions filelock fsspec sympy networkx jinja2 mpmath \
+        packaging regex tokenizers pyyaml requests tqdm \
+        importlib_metadata zipp charset_normalizer idna urllib3 certifi \
+        MarkupSafe
+
+# Model libs at EXACT compile-env versions, --no-deps (the freeze's `grep -v @ `
+# dropped these conda file:// pins; with-deps would re-resolve and conflict with
+# the venv stack). Keep --no-deps to install the code verbatim.
+RUN python -m pip install --no-deps \
+        "diffusers==0.35.2" "optimum-neuron==0.4.5" \
+        "accelerate==1.8.1" "safetensors" "huggingface-hub"
+
+# Pure-python transitive deps the above import at load time (no native build, so
+# safe to name in bulk — stops the one-by-one ModuleNotFound chase). All
+# arch-independent: httpx/anyio (hub), pydantic (optimum), etc.
+RUN python -m pip install --no-deps \
+        httpx httpcore anyio sniffio h11 certifi \
+        pydantic pydantic_core annotated_types \
+        rich markdown_it_py mdurl pygments \
+        click psutil hf_xet
 
 # --- SageMaker serving stack (what the DLC used to give us) ------------------
 # multi-model-server + sagemaker-inference run the model_fn/input_fn/predict_fn
