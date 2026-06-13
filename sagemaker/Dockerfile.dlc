@@ -27,9 +27,12 @@ RUN python -m pip install --no-deps \
 
 # Pure-python transitive the above import at load (DLC may already have most;
 # WITH deps is fine — arch-independent, won't touch torch/numpy).
-# tenacity: neuronx_distributed.trainer.checkpoint_storage imports it, and
-# optimum.exporters.neuron pulls that in. Not in the DLC by default; add it.
-RUN python -m pip install "huggingface-hub" "safetensors" "httpx" "pydantic" "tenacity"
+# tenacity: neuronx_distributed.checkpoint_storage imports it (via optimum exporters).
+# sentencepiece: FLUX's T5 tokenizer is sentencepiece-based; without it the fast
+#   tokenizer can't be built from the slow version ("make sure you have sentencepiece").
+# protobuf: sentencepiece tokenizer conversion needs it.
+RUN python -m pip install "huggingface-hub" "safetensors" "httpx" "pydantic" \
+        "tenacity" "sentencepiece" "protobuf"
 
 # Build-time check: NO Neuron runtime init (no device in builder). Just confirm
 # the import graph resolves — the real .neff load happens at serve time on inf2.
