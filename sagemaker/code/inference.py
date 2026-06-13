@@ -54,6 +54,23 @@ import time
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
+# --- Pin the NeuronCores at IMPORT TIME (before any neuron/torch import) --------
+# On the SageMaker endpoint the host exposes ALL cores (NEURON_CORE_HOST_TOTAL=64
+# on trn1.32xlarge) and the .neff load failed in init_sp_resource /
+# tdrv_get_device_resource_va ("event semaphore vaddr") -> NRT_RESOURCE /
+# Allocation Failure -- even though the SAME image loads fine under local
+# `docker run --device /dev/neuron0..7`. The difference: locally only 8 devices
+# are visible; on SageMaker the runtime must be told WHICH cores to claim, and
+# that must be set BEFORE the Neuron runtime initializes (i.e. here, at module
+# import, not just via the deploy env which can apply too late relative to the
+# torchserve worker's runtime init). Pin cores 0-7 (TP8) and force-set (not
+# setdefault) so we win over any inherited value. Override via the deploy env
+# NEURON_RT_VISIBLE_CORES if a different core range is desired.
+os.environ["NEURON_RT_VISIBLE_CORES"] = os.environ.get("NEURON_RT_VISIBLE_CORES", "0-7")
+# Do NOT also set NEURON_RT_NUM_CORES: having both a count and an explicit
+# visible-core range can conflict during core reservation. Drop the count.
+os.environ.pop("NEURON_RT_NUM_CORES", None)
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
