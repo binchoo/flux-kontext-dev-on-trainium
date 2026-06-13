@@ -60,14 +60,12 @@ RUN python -m pip install --no-deps \
         "diffusers==0.35.2" "optimum-neuron==0.4.5" \
         "accelerate==1.8.1" "safetensors" "huggingface-hub"
 
-# Pure-python transitive deps the above import at load time (no native build, so
-# safe to name in bulk — stops the one-by-one ModuleNotFound chase). All
-# arch-independent: httpx/anyio (hub), pydantic (optimum), etc.
-RUN python -m pip install --no-deps \
-        httpx httpcore anyio sniffio h11 certifi \
-        pydantic pydantic_core annotated_types \
-        rich markdown_it_py mdurl pygments \
-        click psutil hf_xet
+# Pure-python transitive the model libs import at load time. WITH deps here (not
+# --no-deps): these are arch-independent (httpx/httpcore/anyio, pydantic, rich)
+# so letting pip pull THEIR transitive can't touch torch/numpy, and it ends the
+# one-by-one ModuleNotFound chase (e.g. httpcore needs h11+anyio+certifi).
+RUN python -m pip install \
+        "httpx" "pydantic" "rich" "psutil" "hf_xet" "requests" "tokenizers"
 
 # --- SageMaker serving stack (what the DLC used to give us) ------------------
 # multi-model-server + sagemaker-inference run the model_fn/input_fn/predict_fn
