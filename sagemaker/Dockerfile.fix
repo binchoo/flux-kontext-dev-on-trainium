@@ -11,12 +11,18 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
 # --- base OS + python 3.10 (matches the venv interpreter) -------------------
+# default-jre: multi-model-server / torchserve have a JAVA (Netty) frontend that
+# owns the HTTP /ping + /invocations endpoints and manages the python workers.
+# The DLC shipped a JRE; our clean ubuntu base does not, so MMS fails at boot
+# with "java not found, please make sure JAVA_HOME is set". Install a JRE.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.10 python3.10-venv python3-pip \
         curl gnupg ca-certificates \
-        libgomp1 && \
+        libgomp1 \
+        default-jre-headless && \
     ln -sf /usr/bin/python3.10 /usr/bin/python && \
     rm -rf /var/lib/apt/lists/*
+ENV JAVA_HOME=/usr/lib/jvm/default-java
 
 # --- SYSTEM Neuron runtime from the official apt repo -----------------------
 # These .deb provide libnrt with the NRT_2.0.0 symbols (nrt_all_gather etc.)
