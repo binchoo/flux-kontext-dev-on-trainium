@@ -115,7 +115,15 @@ case "${COMPRESS}" in
   *) echo "unknown COMPRESS=${COMPRESS}"; exit 1 ;;
 esac
 echo "      Tar contents (top level):"
-tar -tf "${OUTPUT_TAR}" 2>/dev/null | sed 's#^\./##' | awk -F/ '{print $1}' | sort -u | sed 's/^/        /'
+# Listing is verification-only; never let it hang or kill the script (set -e).
+# Decompress with the matching tool; cap with head so a 26GB archive doesn't
+# stream forever. '|| true' so a listing hiccup never blocks the upload.
+case "${COMPRESS}" in
+  pigz) LIST="pigz -dc '${OUTPUT_TAR}' | tar -tf -" ;;
+  gzip) LIST="tar -tzf '${OUTPUT_TAR}'" ;;
+  none) LIST="tar -tf '${OUTPUT_TAR}'" ;;
+esac
+( eval "${LIST}" 2>/dev/null | sed 's#^\./##' | awk -F/ '{print $1}' | sort -u | sed 's/^/        /' ) || true
 
 echo "[4/4] Uploading to s3://${BUCKET}/${PREFIX}/model.tar.gz ..."
 # Multipart parallel upload tuned for one big file -> saturate bandwidth.
