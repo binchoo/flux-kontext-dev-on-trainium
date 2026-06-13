@@ -727,6 +727,15 @@ def main(args):
         power=args.lr_power,
     )
 
+    # optimum-neuron's NeuronAccelerator.prepare_model() calls model.tie_weights(),
+    # which exists on transformers models but NOT on diffusers models like
+    # FluxTransformer2DModel. Inject a no-op shim on the XLA path so prepare()
+    # doesn't AttributeError. (CUDA accelerate.Accelerator never calls this.)
+    if backend.is_xla():
+        for _m in (transformer, text_encoder_one, vae):
+            if _m is not None and not hasattr(_m, "tie_weights"):
+                _m.tie_weights = (lambda: None)
+
     # Prepare everything with our `accelerator`.
     if args.train_text_encoder:
         (

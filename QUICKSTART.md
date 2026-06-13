@@ -9,7 +9,7 @@ Trainium에서 시작되는 단일 경로 매뉴얼입니다. 분기 선택은 �
 | 항목 | 값 |
 |---|---|
 | 인스턴스 | SageMaker Notebook `ml.trn1.32xlarge` (us-west-2) |
-| NeuronCore | 16 chips = 32 cores (이 가이드는 **1 core**로 컴파일 검증) |
+| NeuronCore | 16 chips = 32 cores (이 가이드는 **8 cores**로 컴파일 검증) |
 | EBS 볼륨 | **512 GB** (모델 ~24GB + Neuron 스택 + 캐시 여유) |
 | Python | 3.10 (인스턴스 기본) |
 | torch | 2.x (Neuron 빌드, `optimum-neuron[neuronx,training]`이 설치) |
@@ -158,7 +158,7 @@ torch: 2.8.0          (← torch-neuronx와 같은 2.8 라인이어야 정상)
 cd /home/ec2-user/SageMaker/flux-kontext-dev-on-trainium
 source .venv-neuron/bin/activate
 export FLUX_BACKEND=xla
-NUM_CORES=1 ./run_neuron.sh
+NUM_CORES=8 ./run_neuron.sh
 ```
 
 이 단계에서 모델(~24GB)이 `$HF_HOME`로 다운로드되고, 첫 스텝에서
