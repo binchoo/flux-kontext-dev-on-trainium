@@ -114,6 +114,14 @@ def main():
         help="container_startup_health_check_timeout seconds. >=600 for the ~50s+ "
         "Neuron load and first warm-up. Default 900 for headroom.",
     )
+    p.add_argument(
+        "--inference-ami-version",
+        default="al2-ami-sagemaker-inference-neuron-2",
+        help="SageMaker ProductionVariant InferenceAmiVersion. "
+        "Default 'al2-ami-sagemaker-inference-neuron-2' ships Neuron Driver 2.19 "
+        "(SageMaker's built-in default 2.10.11 is too old for the DLC image). "
+        "Pass an empty string to omit the field and use the SageMaker default.",
+    )
     args = p.parse_args()
 
     boto_session = boto3.Session(region_name=args.region)
@@ -163,15 +171,60 @@ def main():
     )
 
     print(f"[deploy] creating endpoint '{args.endpoint_name}' on {args.instance_type} ...")
-    model.deploy(
-        initial_instance_count=1,
-        instance_type=args.instance_type,
-        endpoint_name=args.endpoint_name,
-        # Cold load + Neuron device init is ~50s; give the health check room.
-        container_startup_health_check_timeout=args.health_check_timeout,
-        # Neuron load can exceed the default model-download grace too.
-        model_data_download_timeout=1200,
-    )
+
+    if args.inference_ami_version:
+        # model.deploy() has no path to set InferenceAmiVersion on the
+        # ProductionVariant — drop to boto3 for the three-step create flow.
+        print(f"[deploy] InferenceAmiVersion = {args.inference_ami_version}")
+        sm_client = boto_session.client("sagemaker")
+        model_name = args.endpoint_name + "-model"
+        endpoint_config_name = args.endpoint_name + "-config"
+
+        # 1. Register the model object so the endpoint config can reference it.
+        model.name = model_name
+        model._create_sagemaker_model(
+            instance_type=args.instance_type,
+            accelerator_type=None,
+            tags=None,
+        )
+
+        # 2. Endpoint config with the InferenceAmiVersion ProductionVariant field.
+        production_variant = {
+            "VariantName": "AllTraffic",
+            "ModelName": model_name,
+            "InitialInstanceCount": 1,
+            "InstanceType": args.instance_type,
+            "InferenceAmiVersion": args.inference_ami_version,
+            "ContainerStartupHealthCheckTimeoutInSeconds": args.health_check_timeout,
+            "ModelDataDownloadTimeoutInSeconds": 1200,
+        }
+        sm_client.create_endpoint_config(
+            EndpointConfigName=endpoint_config_name,
+            ProductionVariants=[production_variant],
+        )
+
+        # 3. Create and wait for endpoint.
+        sm_client.create_endpoint(
+            EndpointName=args.endpoint_name,
+            EndpointConfigName=endpoint_config_name,
+        )
+        waiter = sm_client.get_waiter("endpoint_in_service")
+        print("[deploy] waiting for endpoint to reach InService (this takes a few minutes) ...")
+        waiter.wait(
+            EndpointName=args.endpoint_name,
+            WaiterConfig={"Delay": 30, "MaxAttempts": 60},
+        )
+    else:
+        model.deploy(
+            initial_instance_count=1,
+            instance_type=args.instance_type,
+            endpoint_name=args.endpoint_name,
+            # Cold load + Neuron device init is ~50s; give the health check room.
+            container_startup_health_check_timeout=args.health_check_timeout,
+            # Neuron load can exceed the default model-download grace too.
+            model_data_download_timeout=1200,
+        )
+
     print(f"[deploy] endpoint '{args.endpoint_name}' is InService.")
     print("[deploy] REMEMBER: ml.inf2.24xlarge bills per-hour while running.")
     print("[deploy] Delete it when done:  aws sagemaker delete-endpoint "
