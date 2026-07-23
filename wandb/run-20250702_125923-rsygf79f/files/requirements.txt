@@ -129,7 +129,7 @@ cachetools==5.5.2
 termcolor==2.5.0
 opencv-python==4.10.0.84
 isodate==0.7.2
-setuptools==75.8.2
+setuptools==83.0.0
 markdown-it-py==3.0.0
 prompt_toolkit==3.0.51
 peft==0.15.1
