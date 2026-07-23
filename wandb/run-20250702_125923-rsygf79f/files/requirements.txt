@@ -80,7 +80,7 @@ scipy==1.14.1
 transformers==4.53.0
 PySocks==1.7.1
 ptyprocess==0.7.0
-pyasn1==0.6.1
+pyasn1==0.6.4
 sseclient==0.0.27
 av==14.0.1
 alembic==1.15.2
