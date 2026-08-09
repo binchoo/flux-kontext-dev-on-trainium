@@ -1,6 +1,6 @@
 greenlet==3.2.2
 kiwisolver==1.4.7
-GitPython==3.1.44
+GitPython==3.1.58
 groovy==0.1.2
 httpcore==1.0.7
 urllib3==2.2.3
