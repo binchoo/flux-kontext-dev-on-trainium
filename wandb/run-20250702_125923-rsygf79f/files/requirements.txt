@@ -77,7 +77,7 @@ nvidia-cufft-cu12==11.0.2.54
 gradio==5.29.1
 fonttools==4.55.3
 scipy==1.14.1
-transformers==4.53.0
+transformers==5.10.1
 PySocks==1.7.1
 ptyprocess==0.7.0
 pyasn1==0.6.1
