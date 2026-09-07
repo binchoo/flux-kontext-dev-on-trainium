@@ -12,7 +12,7 @@ zipp==3.21.0
 pydantic==2.10.2
 platformdirs==4.3.6
 ultralytics==8.3.111
-cryptography==44.0.2
+cryptography==50.0.0
 nvidia-cuda-nvrtc-cu12==12.1.105
 smmap==5.0.2
 httpx==0.28.1
